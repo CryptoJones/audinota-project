@@ -34,7 +34,9 @@ class AudioFile:
 
     def download(self):
         print(f"Downloading {self.url} to {self.path}")
-        with urllib.request.urlopen(self.url) as f:
+        # Timeout guards CI: a hung GitHub release server should fail the
+        # test, not stall the build for hours.
+        with urllib.request.urlopen(self.url, timeout=60) as f:
             data = f.read()
             safe_write(self.path, data)
 

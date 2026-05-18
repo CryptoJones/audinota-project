@@ -23,8 +23,6 @@ bin_pytest = dir_venv_bin / "pytest"
 dir_htmlcov = dir_project_root / "htmlcov"
 path_cov_index_html = dir_htmlcov / "index.html"
 dir_unit_test = dir_project_root / "tests"
-dir_int_test = dir_project_root / "tests_int"
-dir_load_test = dir_project_root / "tests_load"
 
 # ------------------------------------------------------------------------------
 # Doc Related

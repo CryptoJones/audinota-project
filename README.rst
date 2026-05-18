@@ -50,15 +50,22 @@ Welcome to ``audinota`` Documentation
 .. image:: https://audinota.readthedocs.io/en/latest/_static/audinota-logo.png
     :target: https://audinota.readthedocs.io/en/latest/
 
-**Audinota** (Latin for "taking notes from audio") is a lightweight, high-performance Python library designed for fast audio-to-text transcription. Built specifically for extracting textual information from audio content, Audinota enables you to leverage AI-powered text analysis, summarization, and processing on your audio data.
+**Audinota** (Latin for "taking notes from audio") is a small Python library
+that wraps `faster-whisper <https://github.com/SYSTRAN/faster-whisper>`_ with
+a friendly API and CLI for audio-to-text transcription.
 
-The library is built on top of the proven faster-whisper open-source framework and features intelligent automatic audio segmentation with parallel processing capabilities. By automatically chunking large audio files and utilizing multiple CPU cores, Audinota delivers exceptional transcription speed while maintaining accuracy.
+The library focuses on plain text output -- no subtitles, no timestamp
+management, no audio editing. Inputs go through faster-whisper's
+``BatchedInferencePipeline``, which performs VAD-aware chunking and batched
+decoding inside a single model instance. For very long files, an optional
+silence-aligned pre-chunker is available so that boundaries land between
+utterances rather than across words.
 
-Audinota follows a "deadly simple" philosophy - it focuses exclusively on pure audio-to-text conversion without the complexity of subtitle generation or timestamp management. This streamlined approach makes it ideal for information-dense audio content such as research videos, podcasts, lectures, and educational materials.
-
-The project was inspired by real-world research workflows where rapid consumption and analysis of valuable audio content from YouTube videos, podcasts, and other sources is essential. Whether you're a researcher, content creator, or data analyst, Audinota helps you quickly transform audio insights into actionable text for further AI-powered processing and analysis.
-
-**💰 Massive Cost Savings**: While AWS Transcribe costs $0.024/minute ($1.44/hour), Audinota can be deployed on AWS Lambda for approximately $0.0002/minute - making it **120x cheaper** than commercial transcription services. This dramatic cost reduction enables researchers, content creators, and businesses to extract valuable insights from extensive audio archives and YouTube content libraries without breaking the budget. Transform hours of audio content into actionable text for AI analysis, knowledge extraction, and content research at a fraction of traditional cloud service costs.
+Audinota is a thin convenience layer; quality and speed are inherited from
+the underlying ``faster-whisper`` / ``ctranslate2`` runtime and the Whisper
+model you choose. ``tiny`` and ``base`` are fast and small enough for cheap
+CPU-only deployments (e.g. AWS Lambda); ``medium`` and ``large-v3`` are the
+right choice when transcription quality matters more than latency.
 
 
 Quick Start
@@ -79,13 +86,19 @@ Audinota makes audio transcription incredibly simple with just a few lines of co
 
 **What happens under the hood:**
 
-1. **Automatic Format Detection**: Audinota automatically handles popular audio formats including MP3, MP4, WAV, M4A, FLAC, OGG, and more
-2. **Language Detection**: The system automatically detects the spoken language without requiring manual specification
-3. **Smart Segmentation**: Large audio files are intelligently chunked into optimal segments for processing
-4. **Parallel Processing**: Multiple CPU cores work simultaneously on different audio segments for maximum speed
-5. **Text Assembly**: All transcribed segments are seamlessly combined into a single, coherent text output
-
-The entire process is optimized for speed and accuracy, typically processing hours of audio content in just minutes while maintaining high transcription quality across different languages and audio conditions.
+1. **Format support**: Whatever ``faster-whisper`` / ``ffmpeg`` can decode --
+   WAV, FLAC, OGG, and (on systems with ffmpeg available) MP3, MP4, M4A, and
+   other compressed containers.
+2. **Language detection**: Whisper auto-detects the spoken language unless
+   you pass ``language="en"``, ``language="zh"``, etc.
+3. **VAD-aware chunking**: ``BatchedInferencePipeline`` runs Silero VAD on
+   the input and feeds speech-only spans to the decoder in batches.
+4. **Optional silence-aligned pre-chunking**: pass ``seg_duration=120`` to
+   split a multi-hour file into ~2-minute speech-aligned chunks before
+   transcription, so peak memory stays bounded.
+5. **Text assembly**: chunk texts are concatenated; segment objects are also
+   exposed via :class:`TranscribeAudioResult` if you want timestamps or
+   per-segment metadata.
 
 
 Command Line Interface
@@ -111,11 +124,9 @@ Basic Usage
 Parameters
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 **--input** (required)
-    Path to the input audio file. Supports popular formats including:
-    
-    - MP3, MP4, M4A (most common)
-    - WAV, FLAC, OGG (uncompressed/lossless)
-    - And many more formats supported by faster-whisper
+    Path to the input audio file. Anything ``faster-whisper`` / ``ffmpeg`` can
+    decode is accepted -- WAV, FLAC, OGG, and (with ffmpeg installed) the
+    common compressed formats MP3, MP4, M4A, and so on.
 
 **--output** (optional)
     Controls where the transcription is saved:
@@ -149,6 +160,49 @@ Parameters
 
     .. note::
         This only applies when --output specifies a file path. Directory outputs use automatic numbering instead.
+
+Model and inference options
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+**--model_size** (default: ``"tiny"``)
+    Whisper model name (``"tiny"``, ``"base"``, ``"small"``, ``"medium"``,
+    ``"large-v2"``, ``"large-v3"``) or a local model path.
+
+**--device** (default: ``"cpu"``)
+    ``"cpu"``, ``"cuda"``, or ``"auto"``.
+
+**--compute_type** (default: ``"int8"``)
+    ctranslate2 compute type (``"int8"``, ``"float16"``, ``"float32"``, ...).
+    Defaults are CPU-friendly; on GPU use ``"float16"``.
+
+**--cpu_threads** (default: ``0``)
+    Number of CPU threads. ``0`` lets faster-whisper choose.
+
+**--batch_size** (default: ``16``)
+    Decoder batch size. Higher uses more memory; lower is safer on tiny VMs.
+
+**--language** (default: auto-detect)
+    ISO language code (``"en"``, ``"zh"``, ``"ja"``, ...). Skipping detection
+    is a meaningful speedup on short files.
+
+**--task** (default: ``"transcribe"``)
+    ``"transcribe"`` (same-language speech-to-text) or ``"translate"``
+    (any-source-language speech-to-English-text).
+
+**--vad_filter** (default: ``True``)
+    Run Silero VAD to skip non-speech regions before decoding.
+
+**--min_silence_duration_ms** (default: ``500``)
+    Silero VAD silence threshold in milliseconds.
+
+**--seg_duration** (default: ``None``)
+    If set, pre-chunk the audio at silences near every ``seg_duration``
+    seconds. Use for multi-hour files where loading the entire decoded
+    waveform into RAM is undesirable. The default path (``None``) feeds the
+    whole file to batched inference, which is faster for normal inputs.
+
+**--quiet** (default: ``False``)
+    Suppress progress output.
 
 File Conflict Resolution
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -194,27 +248,27 @@ Real-World Examples
     # Replace previous transcription
     $ audinota transcribe --input="revised_audio.wav" --output="final_transcript.txt" --overwrite
 
-Performance Features
+Behavior notes
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-The CLI automatically provides:
 
-- **🚀Parallel Processing**: Utilizes all CPU cores for maximum speed
-- **🧠Smart Segmentation**: Automatically splits large files for optimal processing
-- **🌍Language Detection**: Automatically detects spoken language
-- **📊Progress Feedback**: Real-time status updates with emoji indicators
-- **🔍Format Detection**: Handles various audio formats without configuration
+- **Batched decoding**: ``BatchedInferencePipeline`` runs multiple speech
+  segments through the decoder in parallel inside a single Whisper model.
+- **VAD-aware chunking**: Silero VAD is used to skip non-speech regions and
+  align internal chunks to silence.
+- **Single-model design**: the default path loads one model and reuses it for
+  the whole file. There is no multi-process model-per-chunk fan-out by
+  design -- the model load cost dwarfs the benefit on typical inputs.
 
 .. code-block:: console
 
-    $ audinota transcribe --input="long_podcast.mp3"
-    🎵 Transcribing audio file: long_podcast.mp3
-    📝 Output will be saved to: long_podcast.txt
-    🔄 Loading audio data...
-    🚀 Starting parallel transcription...
-    💾 Saving transcription...
-    ✅ Transcription completed successfully!
-    📄 Output saved to: file:///path/to/long_podcast.txt
-    📊 Text length: 15,847 characters
+    $ audinota transcribe --input=long_podcast.mp3
+    Transcribing audio file: long_podcast.mp3
+    Output will be saved to: long_podcast.txt
+    Loading audio data...
+    Transcribing (model=tiny, device=cpu, compute_type=int8)...
+    Saving transcription...
+    Transcription complete: file:///path/to/long_podcast.txt
+    Text length: 15847 characters
 
 
 .. _install:

@@ -1,17 +1,45 @@
 # -*- coding: utf-8 -*-
 
 """
-Audio Processing Utilities
+Audio segmentation and metadata utilities.
 
-This module provides utilities for audio segmentation and metadata extraction.
-It uses soundfile for direct audio I/O to avoid deprecated audioread dependencies.
+Uses ``soundfile`` for I/O to avoid the deprecated ``audioread`` path.
+
+Three segmentation strategies are provided:
+
+- :func:`segment_audio_by_count`     -- equal-sample slicing into ``n`` chunks.
+- :func:`segment_audio_by_duration`  -- equal-sample slicing targeting a per-chunk
+  duration. Both of the above are content-blind and will cut across words; use
+  them only for non-speech audio or when you control the boundaries.
+- :func:`segment_audio_at_silences`  -- duration-targeted slicing that snaps
+  each cut to the nearest silence inside a search window. This is the right
+  choice for speech, because boundaries land between utterances rather than
+  mid-word.
 """
 
 import typing as T
 import io
 import math
 
+import numpy as np
 import soundfile
+
+
+def _to_wav_bytes(samples: np.ndarray, sample_rate: int) -> bytes:
+    buf = io.BytesIO()
+    soundfile.write(buf, samples, sample_rate, format="WAV")
+    return buf.getvalue()
+
+
+def _load_mono(audio: T.BinaryIO) -> tuple[np.ndarray, int]:
+    audio.seek(0)
+    data, sample_rate = soundfile.read(audio, always_2d=False)
+    audio.seek(0)
+    if data.ndim > 1:
+        # Downmix to mono for silence detection -- transcription quality is
+        # not meaningfully affected and the analysis is much cheaper.
+        data = data.mean(axis=1)
+    return data.astype(np.float32, copy=False), sample_rate
 
 
 def segment_audio_by_count(
@@ -19,85 +47,51 @@ def segment_audio_by_count(
     n_seg: int,
 ) -> list[bytes]:
     """
-    Split audio into a fixed number of segments with equal duration.
-    
-    Each segment will have approximately the same duration, with the last segment
-    potentially being slightly longer to include any remaining samples.
-    
-    :param audio: Audio data as a binary stream (e.g., io.BytesIO from file bytes)
-    :param n_seg: Number of segments to create (must be positive integer)
-    
-    :return: List of WAV audio segments as bytes, ready for further processing
-    
-    Example:
-        >>> audio_bytes = Path("audio.mp3").read_bytes()
-        >>> audio_stream = io.BytesIO(audio_bytes)
-        >>> segments = segment_audio_by_count(audio_stream, 4)
-        >>> print(f"Created {len(segments)} segments")
+    Split audio into a fixed number of segments with equal sample counts.
+
+    The last segment absorbs any remainder so no samples are dropped. This
+    function is content-blind: cuts land at arbitrary sample offsets, so it
+    is unsuitable for speech audio. Use :func:`segment_audio_at_silences` for
+    that case.
+
+    :param audio: Audio data as a binary stream (e.g. ``io.BytesIO``).
+    :param n_seg: Number of segments to create (positive integer).
+
+    :return: List of WAV-encoded segment bytes.
     """
-    # Reset stream to beginning to ensure we read from start
+    if n_seg < 1:
+        raise ValueError(f"n_seg must be >= 1, got {n_seg}")
+
+    audio.seek(0)
+    audio_data, sample_rate = soundfile.read(audio)
     audio.seek(0)
 
-    # Load audio data directly with soundfile (avoids deprecated audioread)
-    audio_data, sample_rate = soundfile.read(audio)
-
-    # Calculate samples per segment for equal distribution
     total_samples = len(audio_data)
     samples_per_segment = total_samples // n_seg
 
     segments = []
-
-    # Create segments with equal sample counts
     for segment_idx in range(n_seg):
-        # Calculate segment boundaries in sample indices
         start_sample = segment_idx * samples_per_segment
-        
-        # Last segment includes any remaining samples to avoid data loss
-        if segment_idx == n_seg - 1:
-            end_sample = total_samples
-        else:
-            end_sample = (segment_idx + 1) * samples_per_segment
-
-        # Extract audio data for this segment
-        segment_audio_data = audio_data[start_sample:end_sample]
-
-        # Convert segment to WAV bytes for compatibility
-        segment_buffer = io.BytesIO()
-        soundfile.write(segment_buffer, segment_audio_data, sample_rate, format="WAV")
-        segment_buffer.seek(0)
-
-        # Store the complete WAV file as bytes
-        segments.append(segment_buffer.getvalue())
+        end_sample = (
+            total_samples
+            if segment_idx == n_seg - 1
+            else (segment_idx + 1) * samples_per_segment
+        )
+        segments.append(_to_wav_bytes(audio_data[start_sample:end_sample], sample_rate))
 
     return segments
 
 
 def get_audio_duration(audio: T.BinaryIO) -> float:
     """
-    Get audio duration in seconds from audio metadata without loading audio data.
-    
-    This function reads only the audio file header to extract duration information,
-    making it efficient for large audio files where you only need the duration.
-    
-    :param audio: Audio data as a binary stream (e.g., io.BytesIO from file bytes)
-    
-    :return: Audio duration in seconds as a floating-point number
-    
-    Example:
-        >>> audio_bytes = Path("recording.wav").read_bytes()
-        >>> audio_stream = io.BytesIO(audio_bytes)
-        >>> duration = get_audio_duration(audio_stream)
-        >>> print(f"Audio is {duration:.1f} seconds long")
+    Return audio duration in seconds from the file header without decoding samples.
+
+    :param audio: Audio data as a binary stream.
+    :return: Duration in seconds.
     """
-    # Reset stream to beginning for reliable metadata reading
     audio.seek(0)
-    
-    # Extract audio metadata efficiently (header-only, no data loading)
     audio_info = soundfile.info(audio)
-    
-    # Reset stream position for subsequent operations
     audio.seek(0)
-    
     return audio_info.duration
 
 
@@ -106,29 +100,106 @@ def segment_audio_by_duration(
     duration: float,
 ) -> list[bytes]:
     """
-    Split audio into segments with a target duration per segment.
-    
-    The audio will be divided into segments where each segment (except possibly
-    the last one) has approximately the specified duration. The last segment
-    may be shorter if the total duration is not evenly divisible.
-    
-    :param audio: Audio data as a binary stream (e.g., io.BytesIO from file bytes)
-    :param duration: Target duration for each segment in seconds (can be fractional)
-    
-    :return: List of WAV audio segments as bytes, ready for further processing
-    
-    Example:
-        >>> audio_bytes = Path("lecture.mp3").read_bytes()
-        >>> audio_stream = io.BytesIO(audio_bytes)
-        >>> # Split into 2-minute segments
-        >>> segments = segment_audio_by_duration(audio_stream, 120.0)
-        >>> print(f"Created {len(segments)} segments of ~2 minutes each")
+    Split audio into equal-count chunks sized to approximately ``duration`` seconds.
+
+    The exact chunk length is ``total_duration / ceil(total_duration / duration)``,
+    so all chunks have identical length. This is content-blind -- see
+    :func:`segment_audio_at_silences` for a speech-safe alternative.
+
+    :param audio: Audio data as a binary stream.
+    :param duration: Target duration per segment in seconds.
     """
-    # Get total audio duration from metadata
     total_duration = get_audio_duration(audio)
-    
-    # Calculate number of segments needed to achieve target duration
-    num_segments = math.ceil(total_duration / duration)
-    
-    # Delegate to count-based segmentation for consistent behavior
+    num_segments = max(1, math.ceil(total_duration / duration))
     return segment_audio_by_count(audio, num_segments)
+
+
+def _silence_centers(
+    samples: np.ndarray,
+    sample_rate: int,
+    window_ms: float = 30.0,
+    rms_floor_ratio: float = 0.02,
+    min_silence_ms: float = 200.0,
+) -> np.ndarray:
+    """Return sample indices in the middle of each silent run."""
+    win = max(1, int(sample_rate * window_ms / 1000))
+    n_windows = len(samples) // win
+    if n_windows == 0:
+        return np.empty(0, dtype=np.int64)
+
+    framed = samples[: n_windows * win].reshape(n_windows, win)
+    rms = np.sqrt(np.mean(framed * framed, axis=1) + 1e-12)
+    peak = rms.max()
+    if peak == 0:
+        return np.empty(0, dtype=np.int64)
+    silent = rms < (peak * rms_floor_ratio)
+
+    min_silence_windows = max(1, int(min_silence_ms / window_ms))
+    centers: list[int] = []
+    i = 0
+    n = len(silent)
+    while i < n:
+        if not silent[i]:
+            i += 1
+            continue
+        j = i
+        while j < n and silent[j]:
+            j += 1
+        if (j - i) >= min_silence_windows:
+            center_window = (i + j) // 2
+            centers.append(center_window * win + win // 2)
+        i = j
+    return np.array(centers, dtype=np.int64)
+
+
+def segment_audio_at_silences(
+    audio: T.BinaryIO,
+    target_duration: float,
+    search_fraction: float = 0.25,
+    min_silence_ms: float = 200.0,
+) -> list[bytes]:
+    """
+    Split audio into chunks of roughly ``target_duration`` seconds, snapping
+    each cut to the nearest silence inside a search window.
+
+    The output is speech-safe: chunk boundaries land between utterances rather
+    than across them. If no silence is found inside the search window for a
+    particular boundary, the cut falls back to the exact target offset.
+
+    :param audio: Audio data as a binary stream.
+    :param target_duration: Approximate chunk duration in seconds.
+    :param search_fraction: Fraction of ``target_duration`` to search on each
+        side for a silence (e.g. ``0.25`` searches ±25%).
+    :param min_silence_ms: Minimum silence length that counts as a cut point.
+
+    :return: List of WAV-encoded segment bytes.
+    """
+    if target_duration <= 0:
+        raise ValueError(f"target_duration must be > 0, got {target_duration}")
+
+    samples, sample_rate = _load_mono(audio)
+    total = len(samples)
+    target_samples = int(target_duration * sample_rate)
+    if total <= target_samples or target_samples <= 0:
+        return [_to_wav_bytes(samples, sample_rate)]
+
+    silence_idx = _silence_centers(samples, sample_rate, min_silence_ms=min_silence_ms)
+    search = int(target_samples * search_fraction)
+
+    cuts = [0]
+    pos = target_samples
+    while pos < total:
+        if silence_idx.size:
+            window = silence_idx[(silence_idx >= pos - search) & (silence_idx <= pos + search)]
+            if window.size:
+                pos = int(window[np.argmin(np.abs(window - pos))])
+        cuts.append(pos)
+        pos += target_samples
+    cuts.append(total)
+
+    # Drop any zero-length spans that could arise if a snap collapsed two boundaries.
+    parts = []
+    for start, end in zip(cuts[:-1], cuts[1:]):
+        if end > start:
+            parts.append(_to_wav_bytes(samples[start:end], sample_rate))
+    return parts
