@@ -3144,7 +3144,6 @@ test = ["big-O", "importlib-resources ; python_version < \"3.9\"", "jaraco.funct
 type = ["pytest-mypy"]
 
 [extras]
-auto = []
 dev = ["build", "rich", "twine", "wheel"]
 doc = ["Sphinx", "docfly", "furo", "ipython", "nbsphinx", "pygments", "rstobj", "sphinx-copybutton", "sphinx-design", "sphinx-jinja"]
 test = ["pytest", "pytest-cov"]
@@ -3152,4 +3151,4 @@ test = ["pytest", "pytest-cov"]
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.10,<4.0"
-content-hash = "66284800bbf2aabea3565dfa65d40f1f477905e3d45a7b6bcc482a029891ab53"
+content-hash = "5f5ed9302176decc2c2c3c79f7cb451cb00a77c008214685d914e70ae2b8473d"
