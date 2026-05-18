@@ -21,7 +21,7 @@
 # sys.path.insert(0, os.path.abspath('.'))
 
 import os
-from datetime import datetime
+from datetime import datetime, timezone
 import audinota as package
 
 package_name = package.__name__
@@ -68,7 +68,7 @@ master_doc = "index"
 
 # General information about the project.
 project = package_name
-copyright = "{}, {}".format(datetime.utcnow().year, package_author)
+copyright = "{}, {}".format(datetime.now(timezone.utc).year, package_author)
 author = package_author
 
 # The version info for the project you're documenting, acts as replacement for
@@ -220,7 +220,7 @@ rst_prolog = "\n" + custom_style_file_content + "\n"
 # Add data for Jinja2
 try:
     from audinota.docs import doc_data
-except:
+except ImportError:
     doc_data = dict()
 
 jinja_contexts = {

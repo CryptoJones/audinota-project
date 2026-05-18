@@ -30,6 +30,9 @@ def run_unit_test(
     """
     Run ``pytest -s --tb=native /path/to/script.py`` Command.
 
+    Propagates pytest's exit code so a failing test produces a non-zero
+    exit from this script.
+
     :param script: the path to test script
     :param root_dir: the dir you want to temporarily set as cwd
     """
@@ -41,7 +44,9 @@ def run_unit_test(
         script,
     ]
     with temp_cwd(Path(root_dir)):
-        subprocess.run(args)
+        result = subprocess.run(args)
+    if result.returncode != 0:
+        sys.exit(result.returncode)
 
 
 def run_cov_test(
@@ -82,7 +87,7 @@ def run_cov_test(
             pass
 
         if __name__ == "__main__":
-            from fixa.pytest_cov_helper import run_cov_test
+            from audinota.vendor.pytest_cov_helper import run_cov_test
 
             run_cov_test(
                 script=__file__,
@@ -96,7 +101,7 @@ def run_cov_test(
     .. code-block:: python
 
         if __name__ == "__main__":
-            from fixa.pytest_cov_helper import run_cov_test
+            from audinota.vendor.pytest_cov_helper import run_cov_test
 
             run_cov_test(
                 script=__file__,
@@ -136,7 +141,11 @@ def run_cov_test(
         script,
     ]
     with temp_cwd(Path(root_dir)):
-        subprocess.run(args)
+        result = subprocess.run(args)
+    if result.returncode != 0 and not preview:
+        # Propagate failure unless the caller asked for the HTML preview --
+        # in that case we still want to open the report below.
+        sys.exit(result.returncode)
     if preview:  # pragma: no cover
         platform = sys.platform
         if platform in ["win32", "cygwin"]:

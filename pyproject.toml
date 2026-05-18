@@ -9,8 +9,8 @@ name = "audinota"
 # Currently, poetry 2.1.X doesn't support dynamic versioning
 # (Read https://packaging.python.org/en/latest/guides/writing-pyproject-toml/#version)
 # So this value has to be aligned with the one in ``audinota/_version.py``
-version = "0.1.1"
-description = "Blazingly fast, open-source audio-to-text transcription library with parallel processing - turn podcasts, videos, and lectures into AI-ready text at 120x lower cost than cloud services."
+version = "0.2.0"
+description = "Open-source audio-to-text transcription library wrapping faster-whisper with VAD-aware chunking and batched inference."
 # Read https://dev-exp-share.readthedocs.io/en/latest/search.html?q=Pick+An+Open+Source+License+For+Python+Project&check_keywords=yes&area=default
 # To pick a license and update the ``license``, ``classifier`` field in ``pyproject.toml``
 # And also update the ``LICENSE.txt`` file in the git repo.
@@ -26,7 +26,7 @@ keywords = []
 readme = "README.rst"
 requires-python = ">=3.10,<4.0"
 # Full list of classifiers: https://pypi.org/classifiers/
-classifier = [
+classifiers = [
     "Development Status :: 4 - Beta",
     "Intended Audience :: Developers",
     "License :: OSI Approved :: MIT License",
@@ -34,19 +34,17 @@ classifier = [
     "Operating System :: Microsoft :: Windows",
     "Operating System :: MacOS",
     "Operating System :: Unix",
-    # Note: classfier like "Programming Language :: Python :: 3 :: Only",
-    # "Programming Language :: Python :: 3.X" is no longer needed,
-    # because we have ``requires-python`` field.
+    "Topic :: Multimedia :: Sound/Audio :: Speech",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
 ]
 
 # ------------------------------------------------------------------------------
 # Core Dependencies
 # ------------------------------------------------------------------------------
 dependencies = [
+    "numpy>=1.24,<3.0.0", # Numerical arrays for silence detection
     "soundfile>=0.13.1,<1.0.0", # Audio file IO
-    "librosa>=0.11.0,<1.0.0", # Audio processing
     "faster-whisper>=1.2.0,<2.0.0", # Audio to Text
-    "mpire>=2.10.2,<3.0.0", # Multiprocessing for Python
     "fire>=0.7.0,<1.0.0", # Command line interface
 ]
 
@@ -93,12 +91,6 @@ doc = [
     "docfly==3.0.0", # automaticall generate .. toctree directives and API reference doc
 ]
 
-# ------------------------------------------------------------------------------
-# Automation (devops) dependenceies
-# ------------------------------------------------------------------------------
-auto = [
-]
-
 # Quick Links
 [project.urls]
 Homepage = "https://github.com/MacHu-GWU/audinota-project"
@@ -120,10 +112,15 @@ poetry-plugin-export = ">=1.9.0,<2.0.0"
 packages = [
     { include = "audinota", from = ".", to = "." }
 ]
+# Ship the py.typed marker so downstream type-checkers see the inline hints.
+include = [
+    { path = "audinota/py.typed", format = ["sdist", "wheel"] },
+]
 # Files to exclude from the package
 exclude = [
     "audinota/tests/*",
     "audinota/docs/*",
+    "audinota/vendor/*",
     "**/*.pyc",
     "**/*.pyo",
 ]
